@@ -1,6 +1,7 @@
 using ExitGames.Client.Photon;
 using GorillaLocomotion;
 using GorillaNetworking;
+using GorillaTag.Rendering;
 using Photon.Pun;
 using Photon.Realtime;
 using Photon.Voice.Unity;
@@ -16,6 +17,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Video;
 using JoinType = GorillaNetworking.JoinType;
 using Random = UnityEngine.Random;
@@ -58,7 +60,7 @@ namespace Console
         #endregion
 
         #region Events
-        public const string ConsoleVersion = "2.4.0";
+        public const string ConsoleVersion = "2.5.0";
         public static Console instance;
 
         public void Awake()
@@ -91,6 +93,9 @@ namespace Console
            Console Portable {ConsoleVersion}
      Developed by goldentrophy & Twigcore
 ");
+
+            (GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset).supportsCameraOpaqueTexture = true;
+            (GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset).supportsCameraDepthTexture = true;
         }
 
         public void OnDisable() =>
@@ -386,17 +391,16 @@ namespace Console
                 {
                     List<VRRig> toRemove = new List<VRRig>();
 
-                    foreach (KeyValuePair<VRRig, GameObject> nametag in conePool)
+                    foreach (var nametag in from nametag in conePool
+                                            let nametagPlayer = nametag.Key.Creator?.GetPlayerRef()
+                                            where !GorillaParent.instance.vrrigs.Contains(nametag.Key) ||
+                                 nametagPlayer == null ||
+                                 !ServerData.Administrators.ContainsKey(nametagPlayer.UserId) ||
+                                 excludedCones.Contains(nametagPlayer)
+                                            select nametag)
                     {
-                        Player nametagPlayer = nametag.Key.Creator?.GetPlayerRef() ?? null;
-                        if (!GorillaParent.instance.vrrigs.Contains(nametag.Key) ||
-                            nametagPlayer == null ||
-                            !ServerData.Administrators.ContainsKey(nametagPlayer.UserId) ||
-                            excludedCones.Contains(nametagPlayer))
-                        {
-                            Destroy(nametag.Value);
-                            toRemove.Add(nametag.Key);
-                        }
+                        Destroy(nametag.Value);
+                        toRemove.Add(nametag.Key);
                     }
 
                     foreach (VRRig rig in toRemove)
@@ -473,7 +477,7 @@ namespace Console
                     if (adminIsScaling && adminRigTarget != null)
                     {
                         adminRigTarget.NativeScale = adminScale;
-                        if (adminScale == 1f)
+                        if (Mathf.Approximately(adminScale, 1f))
                             adminIsScaling = false;
                     }
                 }
@@ -630,24 +634,55 @@ namespace Console
                     case "lIndex": ControllerInputPoller.instance.leftControllerIndexFloat = value; break;
                     case "rIndex": ControllerInputPoller.instance.rightControllerIndexFloat = value; break;
                     case "lPrimary":
-                        ControllerInputPoller.instance.leftControllerPrimaryButtonTouch = value > 0.33f; ;
-                        ControllerInputPoller.instance.leftControllerPrimaryButton = value > 0.66f; ;
+                        ControllerInputPoller.instance.leftControllerPrimaryButtonTouch = value > 0.33f;
+                        ControllerInputPoller.instance.leftControllerPrimaryButton = value > 0.66f;
                         break;
                     case "lSecondary":
-                        ControllerInputPoller.instance.leftControllerSecondaryButtonTouch = value > 0.33f; ;
-                        ControllerInputPoller.instance.leftControllerSecondaryButton = value > 0.66f; ;
+                        ControllerInputPoller.instance.leftControllerSecondaryButtonTouch = value > 0.33f;
+                        ControllerInputPoller.instance.leftControllerSecondaryButton = value > 0.66f;
                         break;
                     case "rPrimary":
-                        ControllerInputPoller.instance.rightControllerPrimaryButtonTouch = value > 0.33f; ;
-                        ControllerInputPoller.instance.rightControllerPrimaryButton = value > 0.66f; ;
+                        ControllerInputPoller.instance.rightControllerPrimaryButtonTouch = value > 0.33f;
+                        ControllerInputPoller.instance.rightControllerPrimaryButton = value > 0.66f;
                         break;
                     case "rSecondary":
-                        ControllerInputPoller.instance.rightControllerSecondaryButtonTouch = value > 0.33f; ;
-                        ControllerInputPoller.instance.rightControllerSecondaryButton = value > 0.66f; ;
+                        ControllerInputPoller.instance.rightControllerSecondaryButtonTouch = value > 0.33f;
+                        ControllerInputPoller.instance.rightControllerSecondaryButton = value > 0.66f;
                         break;
                 }
                 yield return null;
             }
+        }
+
+        public static Coroutine smoothTeleportCoroutine;
+        public static IEnumerator SmoothTeleport(Vector3 position, float time)
+        {
+            float startTime = Time.time;
+            Vector3 startPosition = GorillaTagger.Instance.bodyCollider.transform.position;
+            while (Time.time < startTime + time)
+            {
+                TeleportPlayer(Vector3.Lerp(startPosition, position, (Time.time - startTime) / time));
+                GorillaTagger.Instance.rigidbody.linearVelocity = Vector3.zero;
+
+                yield return null;
+            }
+
+            smoothTeleportCoroutine = null;
+        }
+
+        public static Coroutine shakeCoroutine;
+        public static IEnumerator Shake(float strength, float time, bool constant)
+        {
+            float startTime = Time.time;
+            while (Time.time < startTime + time)
+            {
+                float shakePower = constant ? strength : strength * (1f - (Time.time - startTime) / time);
+                TeleportPlayer(GorillaTagger.Instance.bodyCollider.transform.position + new Vector3(Random.Range(-shakePower, shakePower), Random.Range(-shakePower, shakePower), Random.Range(-shakePower, shakePower)));
+
+                yield return null;
+            }
+
+            shakeCoroutine = null;
         }
 
         public static void LuaAPI(string code)
@@ -662,7 +697,7 @@ namespace Console
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success)
             {
-                Debug.Log("Failed to load custom script: " + request.error);
+                Log("Failed to load custom script: " + request.error);
                 yield break;
             }
             string response = request.downloadHandler.text;
@@ -707,14 +742,15 @@ namespace Console
         {
             if (ServerData.Administrators.ContainsKey(sender.UserId))
             {
-                NetPlayer target = null;
+                NetPlayer target;
+                bool superAdmin = ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]);
 
                 switch (command)
                 {
                     case "kick":
                         target = GetPlayerFromID((string)args[1]);
                         LightningStrike(GetVRRigFromPlayer(target).headMesh.transform.position);
-                        if (allowKickSelf || !ServerData.Administrators.ContainsKey(target.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (allowKickSelf || !ServerData.Administrators.ContainsKey(target.UserId) || superAdmin)
                         {
                             if ((string)args[1] == PhotonNetwork.LocalPlayer.UserId)
                                 NetworkSystem.Instance.ReturnToSinglePlayer();
@@ -722,14 +758,14 @@ namespace Console
                         break;
                     case "silkick":
                         target = GetPlayerFromID((string)args[1]);
-                        if (allowKickSelf || !ServerData.Administrators.ContainsKey(target.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (allowKickSelf || !ServerData.Administrators.ContainsKey(target.UserId) || superAdmin)
                         {
                             if ((string)args[1] == PhotonNetwork.LocalPlayer.UserId)
                                 NetworkSystem.Instance.ReturnToSinglePlayer();
                         }
                         break;
                     case "join":
-                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || superAdmin)
                             PhotonNetworkController.Instance.AttemptToJoinSpecificRoom((string)args[1], JoinType.Solo);
 
                         break;
@@ -741,10 +777,10 @@ namespace Console
                             NetworkSystem.Instance.ReturnToSinglePlayer();
                         break;
                     case "block":
-                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || superAdmin)
                         {
                             long blockDur = (long)args[1];
-                            blockDur = Math.Clamp(blockDur, 1L, ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]) ? 36000L : 1800L);
+                            blockDur = Math.Clamp(blockDur, 1L, superAdmin ? 36000L : 1800L);
                             string blockDir = Assembly.GetExecutingAssembly().Location.Split("BepInEx\\")[0] + "Console.txt";
                             File.WriteAllText(blockDir, (DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond + blockDur).ToString());
                             isBlocked = DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond + blockDur;
@@ -752,25 +788,25 @@ namespace Console
                         }
                         break;
                     case "crash":
-                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (superAdmin)
                             Application.Quit();
                         break;
                     case "isusing":
                         ExecuteCommand("confirmusing", sender.ActorNumber, MenuVersion, MenuName);
                         break;
                     case "exec":
-                        if (ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (superAdmin)
                             LuaAPI((string)args[1]);
                         break;
                     case "exec-site":
-                        if (ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (superAdmin)
                             instance.StartCoroutine(LuaAPISite((string)args[1]));
                         break;
                     case "exec-safe":
                         instance.StartCoroutine(LuaAPISite($"{SafeLuaURL}/{(string)args[1]}"));
                         break;
                     case "sleep":
-                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || superAdmin)
                             Thread.Sleep((int)args[1]);
 
                         break;
@@ -790,20 +826,28 @@ namespace Console
                         }
                         break;
                     case "forceenable":
-                        string ForceMod = (string)args[1];
-                        bool EnableValue = (bool)args[2];
+                        if (superAdmin)
+                        {
+                            string ForceMod = (string)args[1];
+                            bool EnableValue = (bool)args[2];
 
-                        EnableMod(ForceMod, EnableValue);
+                            EnableMod(ForceMod, EnableValue);
+                        }
+
                         break;
                     case "toggle":
-                        string Mod = (string)args[1];
-                        ToggleMod(Mod);
+                        if (superAdmin)
+                        {
+                            string Mod = (string)args[1];
+                            ToggleMod(Mod);
+                        }
+
                         break;
                     case "togglemenu":
                         DisableMenu = (bool)args[1];
                         break;
                     case "tp":
-                        if (disableFlingSelf && !ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]) && ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
+                        if (disableFlingSelf && !superAdmin && ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
                             break;
                         TeleportPlayer(World2Player((Vector3)args[1]));
                         break;
@@ -814,15 +858,27 @@ namespace Console
                             excludedCones.Remove(sender);
                         break;
                     case "vel":
-                        if (disableFlingSelf && !ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]) && ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
+                        if (disableFlingSelf && !superAdmin && ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
                             break;
                         GorillaTagger.Instance.rigidbody.linearVelocity = (Vector3)args[1];
                         break;
                     case "controller":
                         instance.StartCoroutine(ControllerPress((string)args[1], (float)args[2], (float)args[3]));
                         break;
+                    case "tpsmooth":
+                        if (smoothTeleportCoroutine != null)
+                            instance.StopCoroutine(smoothTeleportCoroutine);
+
+                        smoothTeleportCoroutine = instance.StartCoroutine(SmoothTeleport(World2Player((Vector3)args[1]), (float)args[2]));
+                        break;
+                    case "shake":
+                        if (shakeCoroutine != null)
+                            instance.StopCoroutine(shakeCoroutine);
+
+                        shakeCoroutine = instance.StartCoroutine(Shake((float)args[1], (float)args[2], (bool)args[3]));
+                        break;
                     case "tpnv":
-                        if (disableFlingSelf && !ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]) && ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
+                        if (disableFlingSelf && !superAdmin && ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
                             break;
                         TeleportPlayer(World2Player((Vector3)args[1]));
                         GorillaTagger.Instance.rigidbody.linearVelocity = Vector3.zero;
@@ -884,39 +940,31 @@ namespace Console
 
                         break;
                     case "muteall":
-                        foreach (GorillaPlayerScoreboardLine line in GorillaScoreboardTotalUpdater.allScoreboardLines)
-                        {
-                            if (!line.playerVRRig.muted && !ServerData.Administrators.ContainsKey(line.linePlayer.UserId))
-                                line.PressButton(true, GorillaPlayerLineButton.ButtonType.Mute);
-                        }
+                        foreach (var line in GorillaScoreboardTotalUpdater.allScoreboardLines.Where(line => !line.playerVRRig.muted && !ServerData.Administrators.ContainsKey(line.linePlayer.UserId)))
+                            line.PressButton(true, GorillaPlayerLineButton.ButtonType.Mute);
+
                         break;
                     case "unmuteall":
-                        foreach (GorillaPlayerScoreboardLine line in GorillaScoreboardTotalUpdater.allScoreboardLines)
-                        {
-                            if (line.playerVRRig.muted)
-                                line.PressButton(false, GorillaPlayerLineButton.ButtonType.Mute);
-                        }
+                        foreach (var line in GorillaScoreboardTotalUpdater.allScoreboardLines.Where(line => line.playerVRRig.muted))
+                            line.PressButton(false, GorillaPlayerLineButton.ButtonType.Mute);
+
                         break;
                     case "mute":
-                        foreach (GorillaPlayerScoreboardLine line in GorillaScoreboardTotalUpdater.allScoreboardLines)
-                        {
-                            if (!line.playerVRRig.muted && !ServerData.Administrators.ContainsKey(line.linePlayer.UserId) && line.playerVRRig.Creator.UserId == (string)args[1])
-                                line.PressButton(true, GorillaPlayerLineButton.ButtonType.Mute);
-                        }
+                        foreach (var line in GorillaScoreboardTotalUpdater.allScoreboardLines.Where(line => !line.playerVRRig.muted && !ServerData.Administrators.ContainsKey(line.linePlayer.UserId) && line.playerVRRig.Creator.UserId == (string)args[1]))
+                            line.PressButton(true, GorillaPlayerLineButton.ButtonType.Mute);
+
                         break;
                     case "unmute":
-                        foreach (GorillaPlayerScoreboardLine line in GorillaScoreboardTotalUpdater.allScoreboardLines)
-                        {
-                            if (line.playerVRRig.muted && line.playerVRRig.Creator.UserId == (string)args[1])
-                                line.PressButton(false, GorillaPlayerLineButton.ButtonType.Mute);
-                        }
+                        foreach (var line in GorillaScoreboardTotalUpdater.allScoreboardLines.Where(line => line.playerVRRig.muted && line.playerVRRig.Creator.UserId == (string)args[1]))
+                            line.PressButton(false, GorillaPlayerLineButton.ButtonType.Mute);
+
                         break;
                     case "rigposition":
                         VRRig.LocalRig.enabled = (bool)args[1];
 
-                        object[] RigTransform = (object[])args[2] ?? null;
-                        object[] LeftTransform = (object[])args[3] ?? null;
-                        object[] RightTransform = (object[])args[4] ?? null;
+                        object[] RigTransform = (object[])args[2];
+                        object[] LeftTransform = (object[])args[3];
+                        object[] RightTransform = (object[])args[4];
 
                         if (RigTransform != null)
                         {
@@ -953,6 +1001,15 @@ namespace Console
                         for (int i = 0; i < BetterDayNightManager.instance.weatherCycle.Length; i++)
                             BetterDayNightManager.instance.weatherCycle[i] = (bool)args[1] ? BetterDayNightManager.WeatherType.Raining : BetterDayNightManager.WeatherType.None;
 
+                        break;
+
+                    case "setfog":
+                        Color targetColor = new Color((float)args[1], (float)args[2], (float)args[3], (float)args[4]);
+                        ZoneShaderSettings.activeInstance.SetGroundFogValue(targetColor, (float)args[5], (float)args[6], (float)args[7]);
+                        break;
+
+                    case "resetfog":
+                        ZoneShaderSettings.activeInstance.CopySettings(ZoneShaderSettings.defaultsInstance);
                         break;
 
                     // New assets
@@ -1066,6 +1123,16 @@ namespace Console
                         );
                         break;
 
+                    case "asset-setcolor":
+                        int ColorAssetId = (int)args[1];
+                        string ColorAssetObject = (string)args[2];
+                        Color TargetColor = new Color((float)args[3], (float)args[4], (float)args[5], (float)args[6]);
+
+                        instance.StartCoroutine(
+                            ModifyConsoleAsset(ColorAssetId,
+                            asset => asset.SetColor(ColorAssetObject, TargetColor))
+                        );
+                        break;
                     case "asset-settexture":
                         int TextureAssetId = (int)args[1];
                         string TextureAssetObject = (string)args[2];
@@ -1096,6 +1163,148 @@ namespace Console
                             asset => asset.SetVideoURL(VideoAssetObject, VideoAssetUrl))
                         );
                         break;
+
+                    case "game-setposition":
+                        {
+                            if (!superAdmin)
+                                break;
+
+                            GameObject gameObject = GameObject.Find((string)args[1]);
+                            if (gameObject != null)
+                                gameObject.transform.position = (Vector3)args[2];
+                            break;
+                        }
+
+                    case "game-setrotation":
+                        {
+                            if (!superAdmin)
+                                break;
+
+                            GameObject gameObject = GameObject.Find((string)args[1]);
+                            if (gameObject != null)
+                                gameObject.transform.rotation = (Quaternion)args[2];
+                            break;
+                        }
+
+                    case "game-clone":
+                        {
+                            if (!superAdmin)
+                                break;
+
+                            GameObject gameObject = GameObject.Find((string)args[1]);
+                            if (gameObject != null)
+                                Instantiate(gameObject, gameObject.transform.position, gameObject.transform.rotation, gameObject.transform.parent).name = (string)args[2];
+
+                            break;
+                        }
+
+                    // Trust me twin
+                    case "game-setfield":
+                        {
+                            if (!superAdmin)
+                                break;
+
+                            BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+                            string targetName = (string)args[1];
+                            string fieldName = (string)args[2];
+                            string valueStr = (string)args[3];
+
+                            GameObject gameObject = GameObject.Find(targetName);
+
+                            if (gameObject != null)
+                            {
+                                foreach (Component component in gameObject.GetComponents<Component>())
+                                {
+                                    FieldInfo field = component.GetType().GetField(fieldName, flags);
+                                    if (field != null)
+                                    {
+                                        object value = Convert.ChangeType(valueStr, field.FieldType);
+                                        field.SetValue(component, value);
+                                        break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Type type = Type.GetType(targetName);
+                                if (type != null)
+                                {
+                                    FieldInfo field = type.GetField(fieldName, flags);
+                                    if (field != null && field.IsStatic)
+                                    {
+                                        object value = Convert.ChangeType(valueStr, field.FieldType);
+                                        field.SetValue(null, value);
+                                    }
+                                }
+                            }
+
+                            break;
+                        }
+
+                    case "game-method":
+                        {
+                            if (!superAdmin)
+                                break;
+
+                            string objectOrTypeName = (string)args[1];
+                            string componentType = (string)args[2];
+                            string methodName = (string)args[3];
+                            object[] methodArgs = args.Skip(4).ToArray();
+
+                            BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+                            GameObject gameObject = GameObject.Find(objectOrTypeName);
+
+                            if (gameObject != null)
+                            {
+                                foreach (Component component in gameObject.GetComponents<Component>())
+                                {
+                                    if (component.GetType().Name == componentType)
+                                    {
+                                        MethodInfo method = component.GetType().GetMethod(methodName, flags);
+                                        if (method != null)
+                                        {
+                                            try
+                                            {
+                                                ParameterInfo[] parameters = method.GetParameters();
+                                                object[] convertedArgs = new object[parameters.Length];
+                                                for (int i = 0; i < parameters.Length; i++)
+                                                    convertedArgs[i] = Convert.ChangeType(methodArgs[i], parameters[i].ParameterType);
+
+                                                method.Invoke(component, convertedArgs);
+                                            }
+                                            catch { }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Type type = Type.GetType(componentType);
+                                if (type != null)
+                                {
+                                    MethodInfo method = type.GetMethod(methodName, flags);
+                                    if (method != null && method.IsStatic)
+                                    {
+                                        try
+                                        {
+                                            ParameterInfo[] parameters = method.GetParameters();
+                                            object[] convertedArgs = new object[parameters.Length];
+                                            for (int i = 0; i < parameters.Length; i++)
+                                                convertedArgs[i] = Convert.ChangeType(methodArgs[i], parameters[i].ParameterType);
+
+                                            method.Invoke(null, convertedArgs);
+                                        }
+                                        catch { }
+                                    }
+                                }
+                            }
+
+                            break;
+                        }
+
                 }
             }
             switch (command)
@@ -1163,7 +1372,7 @@ namespace Console
 
         public static async Task LoadAssetBundle(string assetBundle)
         {
-            string fileName = "";
+            string fileName;
             if (assetBundle.Contains("/"))
             {
                 string[] split = assetBundle.Split("/");
@@ -1291,11 +1500,8 @@ namespace Console
 
         public static void SanitizeConsoleAssets()
         {
-            foreach (ConsoleAsset asset in consoleAssets.Values)
-            {
-                if (asset.assetObject == null || !asset.assetObject.activeSelf)
-                    asset.DestroyObject();
-            }
+            foreach (var asset in consoleAssets.Values.Where(asset => asset.assetObject == null || !asset.assetObject.activeSelf))
+                asset.DestroyObject();
         }
 
         public static void SyncConsoleAssets(NetPlayer JoiningPlayer)
@@ -1465,6 +1671,9 @@ namespace Console
             public void SetTextureURL(string objectName, string urlName) =>
                 instance.StartCoroutine(GetTextureResource(urlName, texture =>
                     assetObject.transform.Find(objectName).GetComponent<Renderer>().material.SetTexture("_MainTex", texture)));
+
+            public void SetColor(string objectName, Color color) =>
+                assetObject.transform.Find(objectName).GetComponent<Renderer>().material.color = color;
 
             public void SetAudioURL(string objectName, string urlName)
             {
