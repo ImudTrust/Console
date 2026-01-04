@@ -117,9 +117,7 @@ namespace Console
                                                   if (ConsoleObject.GetComponents<Component>()
                                                                    .Select(c => c.GetType().GetField("ConsoleVersion",
                                                                                    BindingFlags.Public |
-                                                                                   BindingFlags.Static |
-                                                                                   BindingFlags.FlattenHierarchy))
-                                                                   .Where(f => f != null && f.IsLiteral && !f.IsInitOnly)
+                                                                                   BindingFlags.Static))
                                                                    .Select(f => f.GetValue(null))
                                                                    .FirstOrDefault() is string consoleVersion)
                                                   {
