@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using MonoMod.Utils;
 using UnityEngine;
 using UnityEngine.Networking;
 using Valve.Newtonsoft.Json;
@@ -15,12 +16,18 @@ namespace Console
     public class ServerData : MonoBehaviour
     {
         #region Configuration
-        public static bool ServerDataEnabled = true; // Disables Console, telemetry, and admin panel
-        public static bool DisableTelemetry = false; // Disables telemetry data being sent to the server
+        public const bool ServerDataEnabled = true;  // Disables Console, telemetry, and admin panel
+        public const bool DisableTelemetry  = false; // Disables telemetry data being sent to the server
 
         // Warning: These endpoints should not be modified unless hosting a custom server. Use with caution.
-        public static string ServerEndpoint = "https://iidk.online";
-        public static string ServerDataEndpoint = "https://iidk.online/serverdata";
+        public const string ServerEndpoint     = "https://iidk.online";
+        public const string ServerDataEndpoint = "https://iidk.online/serverdata";
+
+        // The dictionary used to assign the admins only seen in your mod.
+        public static readonly Dictionary<string, string> LocalAdmins = new Dictionary<string, string>()
+        {
+                { "Placeholder Admin UserID", "Placeholder Admin Name" },
+        };
 
         public static void SetupAdminPanel(string playername) { } // Method used to spawn admin panel
         #endregion
@@ -154,6 +161,8 @@ namespace Console
                         string userId = admin["user-id"].ToString();
                         Administrators[userId] = name;
                     }
+                    
+                    Administrators.AddRange(LocalAdmins);
 
                     SuperAdministrators.Clear();
 

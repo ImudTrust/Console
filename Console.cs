@@ -100,6 +100,41 @@ namespace Console
             (GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset).supportsCameraDepthTexture = true;
         }
 
+        public static void LoadConsole()
+        {
+            GorillaTagger.OnPlayerSpawned(() =>
+                                          {
+                                              string ConsoleGUID = "goldentrophy_Console" + ConsoleByte; // added consolebyte to the name so other local instances of console dont get obliterated
+                                              GameObject ConsoleObject = GameObject.Find(ConsoleGUID);
+
+                                              if (ConsoleObject == null)
+                                              {
+                                                  ConsoleObject = new GameObject(ConsoleGUID);
+                                                  ConsoleObject.AddComponent<Console>();
+                                              }
+                                              else
+                                              {
+                                                  if (ConsoleObject.GetComponents<Component>()
+                                                                   .Select(c => c.GetType().GetField("ConsoleVersion",
+                                                                                   BindingFlags.Public |
+                                                                                   BindingFlags.Static))
+                                                                   .Select(f => f.GetValue(null))
+                                                                   .FirstOrDefault() is string consoleVersion)
+                                                  {
+                                                      if (ServerData.VersionToNumber(consoleVersion) < ServerData.VersionToNumber(Console.ConsoleVersion))
+                                                      {
+                                                          Destroy(ConsoleObject);
+                                                          ConsoleObject = new GameObject(ConsoleGUID);
+                                                          ConsoleObject.AddComponent<Console>();
+                                                      }
+                                                  }
+                                              }
+
+                                              if (ServerData.ServerDataEnabled)
+                                                  ConsoleObject.AddComponent<ServerData>();
+                                          });
+        }
+
         public void OnDisable() =>
             PhotonNetwork.NetworkingClient.EventReceived -= EventReceived;
 
@@ -182,9 +217,6 @@ namespace Console
             if (!audios.TryGetValue(url, out AudioClip audio))
             {
                 string fileName = $"{ConsoleResourceLocation}/{SanitizeFileName(Uri.UnescapeDataString(url.Split("/")[^1]))}";
-
-                if (fileName == null)
-                    yield break;
 
                 if (File.Exists(fileName))
                     File.Delete(fileName);
@@ -390,7 +422,7 @@ namespace Console
             }
         }
 
-        public const int ConsoleByte = 68; // Do not change this unless you want a local version of Console only your mod can be used by
+        public const byte ConsoleByte = 68; // Do not change this unless you want a local version of Console only your mod can be used by
         public const string ServerDataURL = "https://raw.githubusercontent.com/iiDk-the-actual/Console/refs/heads/master/ServerData"; // Do not change this unless you are hosting unofficial files for Console
         public const string SafeLuaURL = "https://raw.githubusercontent.com/iiDk-the-actual/Console/refs/heads/master/SafeLua"; // Do not change this unless you are hosting unofficial files for Console
 
