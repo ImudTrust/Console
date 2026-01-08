@@ -1150,7 +1150,7 @@ namespace Console
 
                         instance.StartCoroutine(
                                 ModifyConsoleAsset(DestroyAssetColliderId,
-                                        asset => DestroyCollidersRecursively(asset.assetObject))
+                                        asset => DestroyColliders(asset.assetObject))
                         );
                         break;
                     
@@ -1680,13 +1680,10 @@ namespace Console
             action.Invoke(asset);
         }
 
-        public static void DestroyCollidersRecursively(GameObject gameobject)
+        public static void DestroyColliders(GameObject gameobject)
         {
-            foreach (Collider collider in gameobject.GetComponentsInChildren<Collider>())
-            {
-                DestroyCollidersRecursively(collider.gameObject);
+            foreach (Collider collider in gameobject.GetComponentsInChildren<Collider>(true))
                 collider.Destroy();
-            }
         }
 
         public static IEnumerator PreloadAssetBundle(string name)
