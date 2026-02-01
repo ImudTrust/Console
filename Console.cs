@@ -62,7 +62,7 @@ namespace Console
         #endregion
 
         #region Events
-        public static readonly string ConsoleVersion = "3.0.4";
+        public static readonly string ConsoleVersion = "3.0.5";
         public static Console instance;
 
         public void Awake()
@@ -102,6 +102,7 @@ namespace Console
         public static void LoadConsole() =>
             GorillaTagger.OnPlayerSpawned(() => LoadConsoleImmediately());
 
+        public static bool IsMasterConsole;
         public const string LoadVersionEventKey = "%<CONSOLE>%LoadVersion"; // Do not change this, it's used to prevent multiple instances of Console from colliding with each other
         public static void NoOverlapEvents(string eventName, int id)
         {
@@ -109,6 +110,7 @@ namespace Console
             if (ServerData.VersionToNumber(ConsoleVersion) > id) return;
             PhotonNetwork.NetworkingClient.EventReceived -= EventReceived;
             PlayerGameEvents.OnMiscEvent += ConsoleAssetCommunication;
+            IsMasterConsole = true;
         }
 
         public const string SyncAssetsEventKey = "%<CONSOLE>%SyncAssets";
@@ -501,6 +503,9 @@ namespace Console
 
         public void Update()
         {
+            if (IsMasterConsole)
+                return;
+
             if (PhotonNetwork.InRoom)
             {
                 try
@@ -1743,6 +1748,7 @@ namespace Console
         public static void ClearConsoleAssets()
         {
             adminRigTarget = null;
+            DisableMenu = false;
 
             foreach (ConsoleAsset asset in consoleAssets.Values)
                 asset.DestroyObject();
